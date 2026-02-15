@@ -1,0 +1,86 @@
+{
+  "name": "jira-xray-orchestrator",
+  "version": "1.0.0",
+  "description": "Secure desktop application for Jira/Xray test orchestration",
+  "main": "dist-electron/main/index.js",
+  "author": "Your Name",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "lint": "eslint . --ext .ts,.tsx",
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist dist-electron release node_modules/.vite"
+  },
+  "dependencies": {
+    "axios": "^1.13.5",
+    "p-limit": "6.2.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "zod": "3.24.1",
+    "zustand": "5.0.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "22.13.1",
+    "@types/react": "19.0.8",
+    "@types/react-dom": "19.0.3",
+    "@typescript-eslint/eslint-plugin": "8.24.0",
+    "@typescript-eslint/parser": "8.24.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "concurrently": "9.1.2",
+    "cross-env": "7.0.3",
+    "electron": "^40.4.1",
+    "electron-builder": "^26.7.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react-hooks": "5.1.0",
+    "postcss": "8.5.1",
+    "rimraf": "6.0.1",
+    "tailwindcss": "^4.0.3",
+    "typescript": "5.7.3",
+    "vite": "^6.4.1",
+    "vite-plugin-electron": "0.29.0",
+    "wait-on": "8.0.2"
+  },
+  "build": {
+    "appId": "com.yourcompany.jira-xray-orchestrator",
+    "productName": "Jira Xray Orchestrator",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/icon.png",
+      "category": "Development"
+    }
+  }
+}
