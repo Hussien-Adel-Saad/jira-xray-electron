@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.0.0",
-    "description": "Field mapping configuration for Jira + Xray integration",
+    "version": "1.4.0",
+    "description": "Production-ready field mapping with validated allowed values",
     "apiVersion": "jira-rest-v2"
   },
   "common": {
@@ -15,7 +15,8 @@
       "jiraField": "issuetype",
       "type": "object",
       "required": true,
-      "format": { "name": "string" }
+      "format": { "name": "string" },
+      "allowedValues": ["Test", "Test Set", "Test Execution", "Test Plan"]
     },
     "summary": {
       "jiraField": "summary",
@@ -24,14 +25,44 @@
     },
     "description": {
       "jiraField": "description",
-      "type": "string",
-      "required": false
+      "type": "text",
+      "required": false,
+      "richText": true
     },
     "priority": {
       "jiraField": "priority",
       "type": "object",
       "required": false,
-      "format": { "name": "string" }
+      "format": { "id": "string" },
+      "suggestionSource": "dynamic",
+      "allowedValues": [
+        { "id": "1", "name": "Highest" },
+        { "id": "2", "name": "High" },
+        { "id": "3", "name": "Medium" },
+        { "id": "4", "name": "Low" },
+        { "id": "5", "name": "Lowest" }
+      ]
+    },
+    "components": {
+      "jiraField": "components",
+      "type": "array",
+      "required": false,
+      "format": [{ "id": "string" }],
+      "suggestionSource": "dynamic"
+    },
+    "labels": {
+      "jiraField": "labels",
+      "type": "array",
+      "required": false,
+      "itemsType": "string",
+      "suggestionSource": "labels"
+    },
+    "fixVersions": {
+      "jiraField": "fixVersions",
+      "type": "array",
+      "required": false,
+      "format": [{ "id": "string" }],
+      "suggestionSource": "dynamic"
     },
     "assignee": {
       "jiraField": "assignee",
@@ -39,20 +70,20 @@
       "required": false,
       "format": { "name": "string" }
     },
-    "labels": {
-      "jiraField": "labels",
-      "type": "array",
-      "required": false
-    },
-    "fixVersions": {
-      "jiraField": "fixVersions",
-      "type": "array",
+    "reporter": {
+      "jiraField": "reporter",
+      "type": "object",
       "required": false,
-      "format": [{ "name": "string" }]
+      "format": { "name": "string" }
     },
     "environment": {
       "jiraField": "environment",
       "type": "string",
+      "required": false
+    },
+    "dueDate": {
+      "jiraField": "duedate",
+      "type": "date",
       "required": false
     }
   },
@@ -60,31 +91,52 @@
     "Test": {
       "jiraIssueTypeName": "Test",
       "xray": {
-        "manualSteps": {
-          "jiraField": "customfield_12404",
-          "type": "array",
-          "required": false
+        "testType": {
+          "jiraField": "customfield_13900",
+          "type": "object",
+          "required": true,
+          "format": { "value": "string" },
+          "allowedValues": [
+            { "value": "Manual" },
+            { "value": "Cucumber" },
+            { "value": "Generic" }
+          ]
         },
         "cucumberTestType": {
           "jiraField": "customfield_13737",
           "type": "object",
           "required": false,
-          "format": { "value": "string" }
+          "format": { "value": "string" },
+          "allowedValues": [
+            { "value": "Scenario" },
+            { "value": "Scenario Outline" }
+          ]
+        },
+        "testRepositoryPath": {
+          "jiraField": "customfield_12411",
+          "type": "string",
+          "required": false
         },
         "preconditions": {
           "jiraField": "customfield_12408",
           "type": "array",
-          "required": false
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Precondition"]
         },
         "testSets": {
           "jiraField": "customfield_12407",
           "type": "array",
-          "required": false
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Test Set"]
         },
         "testPlans": {
           "jiraField": "customfield_12409",
           "type": "array",
-          "required": false
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Test Plan"]
         }
       }
     },
@@ -94,24 +146,21 @@
         "tests": {
           "jiraField": "customfield_12412",
           "type": "array",
-          "required": false
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Test"]
         }
       }
     },
     "Test Execution": {
       "jiraIssueTypeName": "Test Execution",
       "xray": {
-        "testRunStatus": {
-          "jiraField": "customfield_12410",
-          "type": "string",
-          "required": false
-        },
-        "executionStartDate": {
+        "beginDate": {
           "jiraField": "customfield_27000",
           "type": "datetime",
           "required": false
         },
-        "executionEndDate": {
+        "endDate": {
           "jiraField": "customfield_27001",
           "type": "datetime",
           "required": false
@@ -120,6 +169,47 @@
           "jiraField": "customfield_27002",
           "type": "string",
           "required": false
+        },
+        "testEnvironments": {
+          "jiraField": "customfield_12425",
+          "type": "array",
+          "required": false,
+          "format": [{ "value": "string" }],
+          "allowedValues": [
+            { "value": "UAT" },
+            { "value": "Staging" },
+            { "value": "Production" },
+            { "value": "Development" }
+          ]
+        },
+        "tests": {
+          "jiraField": "customfield_12415",
+          "type": "array",
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Test"]
+        }
+      }
+    },
+    "Test Plan": {
+      "jiraIssueTypeName": "Test Plan",
+      "xray": {
+        "beginDate": {
+          "jiraField": "customfield_27000",
+          "type": "datetime",
+          "required": false
+        },
+        "endDate": {
+          "jiraField": "customfield_27001",
+          "type": "datetime",
+          "required": false
+        },
+        "tests": {
+          "jiraField": "customfield_12426",
+          "type": "array",
+          "required": false,
+          "validateIssueKeys": true,
+          "issueTypeFilter": ["Test"]
         }
       }
     }

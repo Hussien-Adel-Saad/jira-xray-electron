@@ -94,6 +94,12 @@ export const IPC_CHANNELS = {
   APPLY_TEMPLATE: 'template:apply',
 } as const;
 
+// Field Mapping
+export const FIELD_MAPPING = {
+  GET_FIELD_MAPPING: 'fieldMapping:getMapping',
+  GET_ISSUE_TYPE_FIELDS: 'fieldMapping:getIssueTypeFields',
+} as const;
+
 // Error codes
 export enum ErrorCode {
   AUTH_FAILED = 'AUTH_FAILED',

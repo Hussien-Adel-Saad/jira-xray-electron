@@ -8,6 +8,7 @@ import * as path from 'path';
 import { registerAuthHandlers, clearSession, initializeAuth } from './ipc/authHandlers';
 import { registerTestHandlers } from './ipc/testHandlers';
 import { registerTemplateHandlers } from './ipc/templateHandlers';
+import { registerFieldMappingHandlers } from './ipc/fieldMappingHandlers';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -74,6 +75,7 @@ function registerHandlers() {
   registerAuthHandlers();
   registerTestHandlers();
   registerTemplateHandlers();
+  registerFieldMappingHandlers();
 }
 
 // App lifecycle

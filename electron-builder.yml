@@ -11,6 +11,7 @@ files:
   - dist-electron/**/*
   - node_modules/**/*
   - package.json
+  - src/shared/fieldMapping.json
 
 compression: normal
 

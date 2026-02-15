@@ -4,7 +4,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS } from '../shared/constants';
+import { IPC_CHANNELS, FIELD_MAPPING } from '../shared/constants';
 import type {
   AuthCredentials,
   AuthStatus,
@@ -83,6 +83,10 @@ export interface ElectronAPI {
   saveTemplate: (template: Template) => Promise<Result<Template>>;
   deleteTemplate: (templateId: string) => Promise<Result<void>>;
   applyTemplate: (application: TemplateApplication) => Promise<Result<AppliedTemplate>>;
+
+  // Field Mapping
+  getFieldMapping: () => Promise<Result<any>>;
+  getIssueTypeFields: (issueType: 'Test' | 'Test Set' | 'Test Execution') => Promise<Result<any>>;
 }
 
 const api: ElectronAPI = {
@@ -140,6 +144,10 @@ const api: ElectronAPI = {
   saveTemplate: (template) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_TEMPLATE, template),
   deleteTemplate: (templateId) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_TEMPLATE, templateId),
   applyTemplate: (application) => ipcRenderer.invoke(IPC_CHANNELS.APPLY_TEMPLATE, application),
+
+  // Field Mapping
+  getFieldMapping: () => ipcRenderer.invoke(FIELD_MAPPING.GET_FIELD_MAPPING),
+  getIssueTypeFields: (issueType) => ipcRenderer.invoke(FIELD_MAPPING.GET_ISSUE_TYPE_FIELDS, issueType),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
