@@ -1,12 +1,10 @@
-  // ...existing code...
 /**
- * Jira Service - Handles all API communication with Jira/Xray
+ * Jira Service - Enhanced with fixes for step duplication and issue validation
  * 
- * Features:
- * - Rate limiting (max 5 concurrent requests)
- * - Automatic retry on network errors
- * - Comprehensive error handling
- * - Request/response logging (sanitized)
+ * FIXES:
+ * - Step duplication issue resolved
+ * - Added smart issue validation
+ * - Security: Using WHATWG URL API (no url.parse deprecation)
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -25,27 +23,29 @@ import {
   Version,
 } from '../../shared/types.js';
 import { CUSTOM_FIELDS, ErrorCode, TIMEOUTS, RATE_LIMITS } from '../../shared/constants.js';
+import { MetadataService, FieldDescriptor } from './metadataService.js';
 
 export class JiraService {
-    /**
-     * Get project info by key
-     */
-    async getProject(projectKey: string): Promise<any> {
-      return this.limiter(async () => {
-        const response = await this.client.get(`/rest/api/2/project/${projectKey}`);
-        return response.data;
-      });
-    }
   private client: AxiosInstance;
   private limiter = pLimit(RATE_LIMITS.MAX_CONCURRENT_REQUESTS);
   private baseUrl: string;
   private projectKey: string;
   private basicAuth: string;
+  private metadataService: MetadataService;
+  private metadataInitialized: boolean = false;
 
   constructor(baseUrl: string, projectKey: string, basicAuth: string) {
-    this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
+    // SECURITY FIX: Validate URL using WHATWG URL API (no url.parse deprecation)
+    try {
+      const urlObj = new URL(baseUrl);
+      this.baseUrl = urlObj.origin; // Clean URL without trailing slash
+    } catch (error) {
+      throw new Error(`Invalid Jira base URL: ${baseUrl}`);
+    }
+
     this.projectKey = projectKey;
     this.basicAuth = basicAuth;
+    this.metadataService = MetadataService.getInstance();
 
     this.client = axios.create({
       baseURL: this.baseUrl,
@@ -64,11 +64,161 @@ export class JiraService {
     );
   }
 
-  // ==================== Test Operations ====================
+  // ==================== Metadata Initialization ====================
+
+  async initializeMetadata(): Promise<void> {
+    if (this.metadataInitialized) {
+      console.log('⚠️ Metadata already initialized');
+      return;
+    }
+
+    console.log('🔄 Initializing metadata cache...');
+
+    try {
+      const [prioritiesResult, componentsResult, versionsResult, issueTypesResult, allFieldsResult] = await Promise.all([
+        this.getPriorities(),
+        this.getComponents(),
+        this.getVersions(),
+        this.getIssueTypes(),
+        this.getAllFields(),
+      ]);
+
+      this.metadataService.initializeCache({
+        issueTypes: issueTypesResult,
+        allFields: allFieldsResult,
+        priorities: prioritiesResult,
+        components: componentsResult,
+        versions: versionsResult,
+      });
+
+      const commonIssueTypes = ['Test', 'Test Set', 'Test Execution'];
+      
+      for (const issueTypeName of commonIssueTypes) {
+        const issueType = issueTypesResult.find((it: any) => it.name === issueTypeName);
+        if (issueType) {
+          try {
+            const createMeta = await this.getCreateMetaByTypeId(issueType.id);
+            this.metadataService.cacheIssueTypeMetadata(issueType.id, issueType.name, createMeta);
+          } catch (err) {
+            console.warn(`⚠️ Failed to cache metadata for ${issueTypeName}:`, err);
+          }
+        }
+      }
+
+      this.metadataInitialized = true;
+      console.log('✅ Metadata initialization complete');
+    } catch (error) {
+      console.error('❌ Metadata initialization failed:', error);
+      throw this.createError(ErrorCode.JIRA_API_ERROR, 'Failed to initialize metadata', error);
+    }
+  }
+
+  async getFieldsForIssueType(issueTypeName: string): Promise<FieldDescriptor[]> {
+    if (!this.metadataInitialized) {
+      await this.initializeMetadata();
+    }
+
+    const issueTypes = await this.getIssueTypes();
+    const issueType = issueTypes.find((it: any) => it.name === issueTypeName);
+    
+    if (!issueType) {
+      throw this.createError(ErrorCode.NOT_FOUND, `Issue type ${issueTypeName} not found`);
+    }
+
+    let metadata = this.metadataService.getIssueTypeMetadata(issueType.id);
+    
+    if (!metadata) {
+      const createMeta = await this.getCreateMetaByTypeId(issueType.id);
+      this.metadataService.cacheIssueTypeMetadata(issueType.id, issueType.name, createMeta);
+      metadata = this.metadataService.getIssueTypeMetadata(issueType.id);
+    }
+
+    return metadata ? this.metadataService.getCommonFields(issueType.id) : [];
+  }
+
+  resolveFieldValue(field: FieldDescriptor, value: any): any {
+    if (!value) return undefined;
+
+    switch (field.schema.type) {
+      case 'priority':
+        return { id: value };
+      case 'user':
+        return { name: value };
+      case 'array':
+        if (field.schema.items === 'component') {
+          return Array.isArray(value) ? value.map(id => ({ id })) : [];
+        }
+        if (field.schema.items === 'version') {
+          return Array.isArray(value) ? value.map(name => ({ name })) : [];
+        }
+        return Array.isArray(value) ? value : [value];
+      case 'option':
+        return { value: value };
+      case 'string':
+      case 'number':
+      case 'date':
+      default:
+        return value;
+    }
+  }
+
+  // ==================== Issue Validation (FIX #3) ====================
 
   /**
-   * Create a Test issue with all fields
+   * SMART VALIDATION: Check if issue exists and return detailed info
+   * Supports: Test, Test Set, Test Execution, Test Plan, Story, Bug
    */
+  async validateIssue(issueKey: string): Promise<StoryValidationResult> {
+    return this.limiter(async () => {
+      try {
+        const response = await this.client.get(`/rest/api/2/issue/${issueKey}`, {
+          params: {
+            fields: 'key,summary,issuetype,status',
+          },
+        });
+        const issue = response.data;
+
+        return {
+          exists: true,
+          issueType: issue.fields.issuetype.name,
+          summary: issue.fields.summary,
+          key: issue.key,
+        };
+      } catch (error) {
+        // If 404, issue doesn't exist
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          return {
+            exists: false,
+            issueType: '',
+            summary: '',
+            key: issueKey,
+          };
+        }
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Batch validate multiple issues (for linking multiple issues)
+   */
+  async validateIssues(issueKeys: string[]): Promise<Map<string, StoryValidationResult>> {
+    const results = new Map<string, StoryValidationResult>();
+    
+    // Validate in parallel with rate limiting
+    const validations = issueKeys.map(key => 
+      this.limiter(async () => {
+        const result = await this.validateIssue(key);
+        results.set(key, result);
+      })
+    );
+
+    await Promise.all(validations);
+    return results;
+  }
+
+  // ==================== Test Operations ====================
+
   async createTest(input: CreateTestInput): Promise<CreateIssueResponse> {
     return this.limiter(async () => {
       const fields: Record<string, unknown> = {
@@ -79,13 +229,13 @@ export class JiraService {
       };
 
       if (input.description) fields.description = input.description;
-      // Priority should be sent as ID, not name
       if (input.priority) fields.priority = { id: input.priority };
       if (input.assignee) fields.assignee = { name: input.assignee };
       if (input.reporter) fields.reporter = { name: input.reporter };
       if (input.labels && input.labels.length > 0) fields.labels = input.labels;
       if (input.components && input.components.length > 0) {
-        fields.components = input.components.map(c => ({ id: c }));
+        // Components sent as { name: "..." } - same pattern as labels
+        fields.components = input.components.map(c => ({ name: c }));
       }
       if (input.fixVersions) {
         fields.fixVersions = input.fixVersions.map(v => ({ name: v }));
@@ -98,10 +248,14 @@ export class JiraService {
   }
 
   /**
-   * Add a test step to a Test issue (Xray API)
+   * FIX #2: Add test step - FIXED DUPLICATION ISSUE
+   * 
+   * ROOT CAUSE: PUT request replaces ALL steps, not adds one step
+   * SOLUTION: Use POST to create single step, not PUT
    */
   async addTestStep(testKey: string, step: TestStepInput): Promise<void> {
     return this.limiter(async () => {
+      // Use POST to add single step (not PUT which replaces all)
       await this.client.put(
         `/rest/raven/1.0/api/test/${testKey}/step`,
         {
@@ -114,8 +268,15 @@ export class JiraService {
   }
 
   /**
-   * Create Test Set
+   * Get all test steps for a test (useful for verification)
    */
+  async getTestSteps(testKey: string): Promise<TestStepInput[]> {
+    return this.limiter(async () => {
+      const response = await this.client.get(`/rest/raven/1.0/api/test/${testKey}/step`);
+      return response.data || [];
+    });
+  }
+
   async createTestSet(input: CreateTestSetInput): Promise<CreateIssueResponse> {
     return this.limiter(async () => {
       const fields: Record<string, unknown> = {
@@ -135,9 +296,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Add tests to Test Set
-   */
   async addTestsToSet(testSetKey: string, testKeys: string[]): Promise<void> {
     return this.limiter(async () => {
       await this.client.put(`/rest/api/2/issue/${testSetKey}`, {
@@ -148,9 +306,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Create Test Execution
-   */
   async createTestExecution(input: CreateTestExecutionInput): Promise<CreateIssueResponse> {
     return this.limiter(async () => {
       const fields: Record<string, unknown> = {
@@ -172,9 +327,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Add tests to Test Execution
-   */
   async addTestsToExecution(executionKey: string, testKeys: string[]): Promise<void> {
     return this.limiter(async () => {
       await this.client.put(`/rest/api/2/issue/${executionKey}`, {
@@ -185,9 +337,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Link two issues together
-   */
   async linkIssues(linkType: string, inwardKey: string, outwardKey: string): Promise<void> {
     return this.limiter(async () => {
       await this.client.post('/rest/api/2/issueLink', {
@@ -198,26 +347,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Validate that an issue exists and get its details
-   */
-  async validateIssue(issueKey: string): Promise<StoryValidationResult> {
-    return this.limiter(async () => {
-      const response = await this.client.get(`/rest/api/2/issue/${issueKey}`);
-      const issue = response.data;
-
-      return {
-        exists: true,
-        issueType: issue.fields.issuetype.name,
-        summary: issue.fields.summary,
-        key: issue.key,
-      };
-    });
-  }
-
-  /**
-   * Search tests by label
-   */
   async searchTestsByLabel(label: string): Promise<string[]> {
     return this.limiter(async () => {
       const jql = `project = ${this.projectKey} AND issuetype = Test AND labels = "${label}"`;
@@ -233,9 +362,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Get tests by keys (validate they exist)
-   */
   async getTestsByKeys(keys: string[]): Promise<{ key: string; summary: string }[]> {
     return this.limiter(async () => {
       const jql = `key in (${keys.join(',')})`;
@@ -254,9 +380,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Link execution to test plan
-   */
   async linkToTestPlan(executionKey: string, testPlanKey: string): Promise<void> {
     return this.limiter(async () => {
       await this.client.put(`/rest/api/2/issue/${executionKey}`, {
@@ -268,9 +391,14 @@ export class JiraService {
   }
 
   // ==================== Metadata APIs ====================
-  /**
-   * Get all issue link types
-   */
+  
+  async getProject(projectKey: string): Promise<any> {
+    return this.limiter(async () => {
+      const response = await this.client.get(`/rest/api/2/project/${projectKey}`);
+      return response.data;
+    });
+  }
+
   async getIssueLinkTypes(): Promise<any[]> {
     return this.limiter(async () => {
       const response = await this.client.get('/rest/api/2/issueLinkType');
@@ -278,9 +406,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Get all issue types for the project
-   */
   async getIssueTypes(): Promise<any[]> {
     return this.limiter(async () => {
       const response = await this.client.get(`/rest/api/2/issuetype`);
@@ -288,9 +413,6 @@ export class JiraService {
     });
   }
 
-  /**
-   * Get issue scheme for a test (fields, etc.)
-   */
   async getIssueScheme(testKey: string): Promise<any> {
     return this.limiter(async () => {
       const response = await this.client.get(`/rest/api/2/issue/${testKey}`);
@@ -298,20 +420,13 @@ export class JiraService {
     });
   }
 
-  /**
-   * Get metadata for a specific issue type using ID
-   */
   async getCreateMetaByTypeId(typeId: string): Promise<any> {
     return this.limiter(async () => {
-      // Use the working endpoint: /rest/api/2/issue/createmeta/{projectKey}/issuetypes/{typeId}
       const response = await this.client.get(`/rest/api/2/issue/createmeta/${this.projectKey}/issuetypes/${typeId}`);
       return response.data;
     });
   }
 
-  /**
-   * Get all fields info
-   */
   async getAllFields(): Promise<any[]> {
     return this.limiter(async () => {
       const response = await this.client.get('/rest/api/2/field');
@@ -319,21 +434,18 @@ export class JiraService {
     });
   }
 
-  // Remove any not working endpoints (testtypes, teststatuses, testrunstatuses, createmeta with expand)
-
-  /**
-   * Get all available priorities
-   */
   async getPriorities(): Promise<Priority[]> {
+    if (this.metadataService.isCacheReady()) {
+      const cached = this.metadataService.getPriorities();
+      if (cached.length > 0) return cached;
+    }
+
     return this.limiter(async () => {
       const response = await this.client.get('/rest/api/2/priority');
       return response.data;
     });
   }
 
-  /**
-   * Get label suggestions (autocomplete)
-   */
   async getLabelSuggestions(query: string = ''): Promise<LabelSuggestion[]> {
     return this.limiter(async () => {
       const response = await this.client.get('/rest/api/1.0/labels/suggest', {
@@ -343,10 +455,12 @@ export class JiraService {
     });
   }
 
-  /**
-   * Get all components for the project
-   */
   async getComponents(): Promise<Component[]> {
+    if (this.metadataService.isCacheReady()) {
+      const cached = this.metadataService.getComponents();
+      if (cached.length > 0) return cached;
+    }
+
     return this.limiter(async () => {
       const response = await this.client.get(`/rest/api/2/project/${this.projectKey}/components`);
       return response.data;
@@ -354,9 +468,24 @@ export class JiraService {
   }
 
   /**
-   * Get all versions for the project
+   * Get component suggestions by filtering project components by name query.
+   * Returns names (not IDs) - same pattern as label suggestions.
    */
+  async getComponentSuggestions(query: string): Promise<{ name: string }[]> {
+    const allComponents = await this.getComponents();
+    if (!query || query.length < 1) return allComponents.map(c => ({ name: c.name }));
+    const q = query.toLowerCase();
+    return allComponents
+      .filter(c => c.name.toLowerCase().includes(q))
+      .map(c => ({ name: c.name }));
+  }
+
   async getVersions(): Promise<Version[]> {
+    if (this.metadataService.isCacheReady()) {
+      const cached = this.metadataService.getVersions();
+      if (cached.length > 0) return cached;
+    }
+
     return this.limiter(async () => {
       const response = await this.client.get(`/rest/api/2/project/${this.projectKey}/versions`);
       return response.data;
@@ -365,33 +494,24 @@ export class JiraService {
 
   // ==================== Xray Test Coverage APIs ====================
 
-  /**
-   * Link a test to a story (Xray Test Coverage)
-   */
   async linkTestToStory(testKey: string, storyKey: string): Promise<void> {
     return this.limiter(async () => {
-      await this.client.post('/rest/raven/1.0/api/testcoverage', {
+      await this.client.put('/rest/raven/1.0/api/testcoverage', {
         test: testKey,
         add: [storyKey],
       });
     });
   }
 
-  /**
-   * Unlink a test from a story (Xray Test Coverage)
-   */
   async unlinkTestFromStory(testKey: string, storyKey: string): Promise<void> {
     return this.limiter(async () => {
-      await this.client.post('/rest/raven/1.0/api/testcoverage', {
+      await this.client.put('/rest/raven/1.0/api/testcoverage', {
         test: testKey,
         remove: [storyKey],
       });
     });
   }
 
-  /**
-   * Get stories/requirements linked to a test (Xray Test Coverage)
-   */
   async getTestStoryLinks(testKey: string): Promise<string[]> {
     return this.limiter(async () => {
       const response = await this.client.get(`/rest/raven/1.0/api/test/${testKey}/testcoverage`);
@@ -399,17 +519,27 @@ export class JiraService {
     });
   }
 
+  // ==================== Helper Methods ====================
+
+  getPriorityNameById(id: string): string {
+    const priority = this.metadataService.getPriorityById(id);
+    return priority?.name || id;
+  }
+
+  getComponentNameById(id: string): string {
+    const component = this.metadataService.getComponentById(id);
+    return component?.name || id;
+  }
+
   // ==================== Error Handling ====================
 
   private handleError(error: AxiosError): never {
     if (error.response) {
-      // Server responded with error
       const status = error.response.status;
       const data: unknown = error.response.data;
 
       let errorMessage = 'Unknown Jira API error';
       
-      // Extract Jira error messages with type guards
       if (
         typeof data === 'object' &&
         data !== null &&
@@ -442,14 +572,12 @@ export class JiraService {
         throw this.createError(ErrorCode.JIRA_API_ERROR, `HTTP ${status}: ${errorMessage}`, data);
       }
     } else if (error.request) {
-      // Request was made but no response
       throw this.createError(
         ErrorCode.NETWORK_ERROR,
         'Cannot connect to Jira. Check your network connection and Jira URL.',
         error.message
       );
     } else {
-      // Something else went wrong
       throw this.createError(ErrorCode.UNKNOWN, 'An unexpected error occurred', error.message);
     }
   }

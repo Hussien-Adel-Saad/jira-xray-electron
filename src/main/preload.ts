@@ -1,5 +1,5 @@
 /**
- * Preload Script
+ * Preload Script - UPDATED with batch validation and step retrieval
  * Exposes safe IPC API to renderer process via contextBridge
  */
 
@@ -23,17 +23,20 @@ import type {
   Component,
   Version,
   LabelSuggestion,
+  TestStepInput,
 } from '../shared/types';
 
 // Define the API interface
 export interface ElectronAPI {
-      getProject: (projectKey: string) => Promise<Result<any>>;
-    // Enhanced Metadata APIs
-    getIssueLinkTypes: () => Promise<Result<any[]>>;
-    getIssueTypes: () => Promise<Result<any[]>>;
-    getIssueScheme: (testKey: string) => Promise<Result<any>>;
-    getCreateMetaByTypeId: (typeId: string) => Promise<Result<any>>;
-    getAllFields: () => Promise<Result<any[]>>;
+  getProject: (projectKey: string) => Promise<Result<any>>;
+  
+  // Enhanced Metadata APIs
+  getIssueLinkTypes: () => Promise<Result<any[]>>;
+  getIssueTypes: () => Promise<Result<any[]>>;
+  getIssueScheme: (testKey: string) => Promise<Result<any>>;
+  getCreateMetaByTypeId: (typeId: string) => Promise<Result<any>>;
+  getAllFields: () => Promise<Result<any[]>>;
+  
   // Auth
   login: (credentials: AuthCredentials) => Promise<Result<AuthStatus>>;
   logout: () => Promise<Result<void>>;
@@ -43,6 +46,7 @@ export interface ElectronAPI {
 
   // Test operations
   validateStory: (storyKey: string) => Promise<Result<StoryValidationResult>>;
+  validateIssues: (issueKeys: string[]) => Promise<Result<Record<string, StoryValidationResult>>>; // NEW
   createTest: (testInput: CreateTestInput) => Promise<Result<CreateIssueResponse>>;
   createTestSet: (
     setInput: CreateTestSetInput,
@@ -66,10 +70,12 @@ export interface ElectronAPI {
   addTestsToSet: (testSetKey: string, testKeys: string[]) => Promise<any>;
   addTestsToExecution: (executionKey: string, testKeys: string[]) => Promise<any>;
   addTestStep: (testKey: string, step: any) => Promise<any>;
+  getTestSteps: (testKey: string) => Promise<Result<TestStepInput[]>>; // NEW
 
   // Metadata Operations
   getPriorities: () => Promise<Result<Priority[]>>;
   getLabelSuggestions: (query: string) => Promise<Result<LabelSuggestion[]>>;
+  getComponentSuggestions: (query: string) => Promise<Result<{ name: string }[]>>;
   getComponents: () => Promise<Result<Component[]>>;
   getVersions: () => Promise<Result<Version[]>>;
 
@@ -77,6 +83,9 @@ export interface ElectronAPI {
   linkTestToStory: (testKey: string, storyKey: string) => Promise<Result<void>>;
   unlinkTestFromStory: (testKey: string, storyKey: string) => Promise<Result<void>>;
   getTestStoryLinks: (testKey: string) => Promise<Result<string[]>>;
+
+  // Shell
+  openExternal: (url: string) => Promise<void>;
 
   // Templates
   getTemplates: () => Promise<Result<Template[]>>;
@@ -86,13 +95,15 @@ export interface ElectronAPI {
 }
 
 const api: ElectronAPI = {
-    getProject: (projectKey: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_PROJECT, projectKey),
-    // Enhanced Metadata APIs
-    getIssueLinkTypes: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_LINK_TYPES),
-    getIssueTypes: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_TYPES),
-    getIssueScheme: (testKey) => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_SCHEME, testKey),
-    getCreateMetaByTypeId: (typeId) => ipcRenderer.invoke(IPC_CHANNELS.GET_CREATE_META_BY_TYPE_ID, typeId),
-    getAllFields: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ALL_FIELDS),
+  getProject: (projectKey: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_PROJECT, projectKey),
+  
+  // Enhanced Metadata APIs
+  getIssueLinkTypes: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_LINK_TYPES),
+  getIssueTypes: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_TYPES),
+  getIssueScheme: (testKey) => ipcRenderer.invoke(IPC_CHANNELS.GET_ISSUE_SCHEME, testKey),
+  getCreateMetaByTypeId: (typeId) => ipcRenderer.invoke(IPC_CHANNELS.GET_CREATE_META_BY_TYPE_ID, typeId),
+  getAllFields: () => ipcRenderer.invoke(IPC_CHANNELS.GET_ALL_FIELDS),
+  
   // Auth
   login: (credentials) => ipcRenderer.invoke(IPC_CHANNELS.LOGIN, credentials),
   logout: () => ipcRenderer.invoke(IPC_CHANNELS.LOGOUT),
@@ -104,6 +115,7 @@ const api: ElectronAPI = {
 
   // Test operations
   validateStory: (storyKey) => ipcRenderer.invoke(IPC_CHANNELS.VALIDATE_STORY, storyKey),
+  validateIssues: (issueKeys) => ipcRenderer.invoke(IPC_CHANNELS.VALIDATE_ISSUES, issueKeys), // NEW
   createTest: (testInput) => ipcRenderer.invoke(IPC_CHANNELS.CREATE_TEST, testInput),
   createTestSet: (setInput, testKeys) =>
     ipcRenderer.invoke(IPC_CHANNELS.CREATE_TEST_SET, setInput, testKeys),
@@ -120,10 +132,12 @@ const api: ElectronAPI = {
   addTestsToSet: (testSetKey, testKeys) => ipcRenderer.invoke('test:addTestsToSet', testSetKey, testKeys),
   addTestsToExecution: (executionKey, testKeys) => ipcRenderer.invoke('test:addTestsToExecution', executionKey, testKeys),
   addTestStep: (testKey, step) => ipcRenderer.invoke(IPC_CHANNELS.ADD_TEST_STEP, testKey, step),
+  getTestSteps: (testKey) => ipcRenderer.invoke(IPC_CHANNELS.GET_TEST_STEPS, testKey), // NEW
 
   // Metadata Operations
   getPriorities: () => ipcRenderer.invoke(IPC_CHANNELS.GET_PRIORITIES),
   getLabelSuggestions: (query) => ipcRenderer.invoke(IPC_CHANNELS.GET_LABEL_SUGGESTIONS, query),
+  getComponentSuggestions: (query) => ipcRenderer.invoke(IPC_CHANNELS.GET_COMPONENT_SUGGESTIONS, query),
   getComponents: () => ipcRenderer.invoke(IPC_CHANNELS.GET_COMPONENTS),
   getVersions: () => ipcRenderer.invoke(IPC_CHANNELS.GET_VERSIONS),
 
@@ -134,6 +148,9 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.UNLINK_TEST_FROM_STORY, testKey, storyKey),
   getTestStoryLinks: (testKey) => 
     ipcRenderer.invoke(IPC_CHANNELS.GET_TEST_STORY_LINKS, testKey),
+
+  // Shell
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 
   // Templates
   getTemplates: () => ipcRenderer.invoke(IPC_CHANNELS.GET_TEMPLATES),

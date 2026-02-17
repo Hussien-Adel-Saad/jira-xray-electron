@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "axios": "^1.13.5",
+    "lucide-react": "^0.564.0",
     "p-limit": "6.2.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
@@ -58,8 +59,10 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
+    "dist/**/*",
+    "dist-electron/**/*",
+    "!.env",
+    "!**/.env"
     ],
     "win": {
       "target": [

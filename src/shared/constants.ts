@@ -1,13 +1,12 @@
 /**
  * Shared constants used across main and renderer processes
+ * Updated with batch validation support
  */
 
 // Custom field IDs for MTD project
 export const CUSTOM_FIELDS = {
   TEST_TYPE: 'customfield_13900',
   MANUAL_TEST_STEPS: 'customfield_12404',
-  // TEST_ENVIRONMENTS field (customfield_12425) has been removed - causes HTTP 400 errors
-  // It is not on the appropriate screen in Jira
   TESTS_IN_EXECUTION: 'customfield_12415',
   TESTS_IN_SET: 'customfield_12412',
   TEST_PLANS_LINK: 'customfield_12409',
@@ -52,12 +51,14 @@ export const PRIORITIES = {
 
 // IPC channels
 export const IPC_CHANNELS = {
-    GET_ISSUE_LINK_TYPES: 'metadata:getIssueLinkTypes',
-    GET_ISSUE_TYPES: 'metadata:getIssueTypes',
-    GET_ISSUE_SCHEME: 'metadata:getIssueScheme',
-    GET_CREATE_META_BY_TYPE_ID: 'metadata:getCreateMetaByTypeId',
-    GET_ALL_FIELDS: 'metadata:getAllFields',
-    GET_PROJECT: 'metadata:getProject',
+  GET_ISSUE_LINK_TYPES: 'metadata:getIssueLinkTypes',
+  GET_ISSUE_TYPES: 'metadata:getIssueTypes',
+  GET_ISSUE_SCHEME: 'metadata:getIssueScheme',
+  GET_CREATE_META_BY_TYPE_ID: 'metadata:getCreateMetaByTypeId',
+  GET_ALL_FIELDS: 'metadata:getAllFields',
+  GET_PROJECT: 'metadata:getProject',
+  GET_FIELDS_FOR_ISSUE_TYPE: 'metadata:getFieldsForIssueType',
+  
   // Auth
   LOGIN: 'auth:login',
   LOGOUT: 'auth:logout',
@@ -67,6 +68,7 @@ export const IPC_CHANNELS = {
   
   // Test operations
   VALIDATE_STORY: 'test:validateStory',
+  VALIDATE_ISSUES: 'test:validateIssues', // NEW: Batch validation
   CREATE_TEST: 'test:create',
   CREATE_TEST_SET: 'test:createSet',
   CREATE_EXECUTION: 'test:createExecution',
@@ -75,6 +77,7 @@ export const IPC_CHANNELS = {
   SEARCH_TESTS_BY_LABEL: 'test:searchByLabel',
   GET_TESTS_BY_KEYS: 'test:getByKeys',
   ADD_TEST_STEP: 'test:addStep',
+  GET_TEST_STEPS: 'test:getSteps', // NEW: Get test steps
   
   // Xray Test Coverage
   LINK_TEST_TO_STORY: 'test:linkTestToStory',
@@ -84,9 +87,13 @@ export const IPC_CHANNELS = {
   // Metadata operations
   GET_PRIORITIES: 'metadata:getPriorities',
   GET_LABEL_SUGGESTIONS: 'metadata:getLabelSuggestions',
+  GET_COMPONENT_SUGGESTIONS: 'metadata:getComponentSuggestions',
   GET_COMPONENTS: 'metadata:getComponents',
   GET_VERSIONS: 'metadata:getVersions',
   
+  // Shell
+  OPEN_EXTERNAL: 'shell:openExternal',
+
   // Templates
   GET_TEMPLATES: 'template:getAll',
   SAVE_TEMPLATE: 'template:save',

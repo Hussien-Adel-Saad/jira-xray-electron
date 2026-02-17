@@ -7,6 +7,7 @@
 
 import path from 'path';
 import dotenv from 'dotenv';
+import { app } from 'electron';
 
 interface JiraConfig {
   baseUrl: string;
@@ -19,7 +20,10 @@ interface JiraConfig {
  * Load .env file safely
  */
 function loadEnv(): void {
-  const envPath = path.join(process.cwd(), '.env'); // project root
+  const envPath = app.isPackaged
+    ? path.join(process.resourcesPath, '.env')  // production: resources folder
+    : path.join(process.cwd(), '.env');          // dev: project root
+
   const result = dotenv.config({ path: envPath });
 
   if (result.error) {

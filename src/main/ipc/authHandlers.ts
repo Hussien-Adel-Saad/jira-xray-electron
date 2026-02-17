@@ -1,10 +1,12 @@
 /**
  * Auth IPC Handlers
  * Auto-initializes from .env file (no login UI needed)
+ * Initializes metadata cache on startup for performance
  */
 
 import { ipcMain } from 'electron';
 import { CredentialService } from '../services/credentialService';
+import { JiraService } from '../services/jiraService';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { AuthStatus, Result } from '../../shared/types';
 import { ErrorCode } from '../../shared/constants';
@@ -15,23 +17,39 @@ let currentSession: {
   basicAuth: string;
   jiraBaseUrl: string;
   projectKey: string;
+  jiraService: JiraService;
 } | null = null;
 
 /**
  * Initialize auth from .env on app startup
+ * Also initializes metadata cache for performance
  */
-export function initializeAuth(): void {
+export async function initializeAuth(): Promise<void> {
   try {
     const credentials = CredentialService.getCredentials();
     
+    // Create Jira service instance
+    const jiraService = new JiraService(
+      credentials.baseUrl,
+      credentials.projectKey,
+      credentials.basicAuth
+    );
+
     currentSession = {
       username: credentials.username,
       basicAuth: credentials.basicAuth,
       jiraBaseUrl: credentials.baseUrl,
       projectKey: credentials.projectKey,
+      jiraService,
     };
 
     console.log('✅ Auto-logged in from .env:', credentials.username);
+
+    // Initialize metadata cache in background for performance
+    console.log('🔄 Initializing metadata cache...');
+    await jiraService.initializeMetadata();
+    console.log('✅ Metadata cache ready');
+
   } catch (error) {
     console.error('❌ Failed to load credentials from .env:', error);
     console.error('Please create a .env file with your Jira credentials');
@@ -48,7 +66,7 @@ export function registerAuthHandlers() {
     try {
       if (!currentSession) {
         // Try to initialize if not already done
-        initializeAuth();
+        await initializeAuth();
       }
 
       return {
@@ -86,9 +104,20 @@ export function registerAuthHandlers() {
  */
 export function getCurrentSession() {
   if (!currentSession) {
-    initializeAuth();
+    throw {
+      code: ErrorCode.AUTH_FAILED,
+      message: 'Not authenticated. Please restart the app.',
+    };
   }
   return currentSession;
+}
+
+/**
+ * Get Jira service instance from current session
+ */
+export function getJiraService(): JiraService {
+  const session = getCurrentSession();
+  return session.jiraService;
 }
 
 /**

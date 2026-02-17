@@ -1,12 +1,10 @@
 /**
- * Test IPC Handlers
- * Handles test creation and workflow IPC communication
+ * Test IPC Handlers - Enhanced with batch validation and step retrieval
  */
 
 import { ipcMain } from 'electron';
-import { JiraService } from '../services/jiraService.js';
-import { getCurrentSession } from './authHandlers.js';
-import { IPC_CHANNELS, ErrorCode } from '../../shared/constants.js';
+import { getJiraService } from './authHandlers.js';
+import { IPC_CHANNELS } from '../../shared/constants.js';
 import type {
   CreateTestInput,
   CreateTestSetInput,
@@ -21,121 +19,29 @@ import type {
   Component,
   Version,
   LabelSuggestion,
+  TestStepInput,
 } from  '../../shared/types.js';
-
-/**
- * Create Jira service from current session
- */
-function getJiraService(): JiraService {
-  const session = getCurrentSession();
-  if (!session) {
-    throw {
-      code: ErrorCode.AUTH_FAILED,
-      message: 'Not authenticated. Please log in first.',
-    } as AppError;
-  }
-
-  return new JiraService(session.jiraBaseUrl, session.projectKey, session.basicAuth);
-}
+import type { FieldDescriptor } from '../services/metadataService.js';
 
 export function registerTestHandlers() {
-        /**
-         * Get all issue types
-         */
-        ipcMain.handle(
-          IPC_CHANNELS.GET_ISSUE_TYPES,
-          async (): Promise<Result<any[]>> => {
-            try {
-              const jiraService = getJiraService();
-              const data = await jiraService.getIssueTypes();
-              return { success: true, data };
-            } catch (error: unknown) {
-              return { success: false, error: error as AppError };
-            }
-          }
-        );
-    /**
-     * Get all issue link types
-     */
-    ipcMain.handle(
-      IPC_CHANNELS.GET_ISSUE_LINK_TYPES,
-      async (): Promise<Result<any[]>> => {
-        try {
-          const jiraService = getJiraService();
-          const data = await jiraService.getIssueLinkTypes();
-          return { success: true, data };
-        } catch (error: unknown) {
-          return { success: false, error: error as AppError };
-        }
-      }
-    );
-
-    /**
-     * Get project info by key
-     */
-    ipcMain.handle(
-      IPC_CHANNELS.GET_PROJECT,
-      async (_event, projectKey: string): Promise<Result<any>> => {
-        try {
-          const jiraService = getJiraService();
-          const data = await jiraService.getProject(projectKey);
-          return { success: true, data };
-        } catch (error: unknown) {
-          return { success: false, error: error as AppError };
-        }
-      }
-    );
-
-    /**
-     * Get issue scheme for a test
-     */
-    ipcMain.handle(
-      IPC_CHANNELS.GET_ISSUE_SCHEME,
-      async (_event, testKey: string): Promise<Result<any>> => {
-        try {
-          const jiraService = getJiraService();
-          const data = await jiraService.getIssueScheme(testKey);
-          return { success: true, data };
-        } catch (error: unknown) {
-          return { success: false, error: error as AppError };
-        }
-      }
-    );
-
-    /**
-     * Get create meta by issue type ID
-     */
-    ipcMain.handle(
-      IPC_CHANNELS.GET_CREATE_META_BY_TYPE_ID,
-      async (_event, typeId: string): Promise<Result<any>> => {
-        try {
-          const jiraService = getJiraService();
-          const data = await jiraService.getCreateMetaByTypeId(typeId);
-          return { success: true, data };
-        } catch (error: unknown) {
-          return { success: false, error: error as AppError };
-        }
-      }
-    );
-
-    /**
-     * Get all fields info
-     */
-    ipcMain.handle(
-      IPC_CHANNELS.GET_ALL_FIELDS,
-      async (): Promise<Result<any[]>> => {
-        try {
-          const jiraService = getJiraService();
-          const data = await jiraService.getAllFields();
-          return { success: true, data };
-        } catch (error: unknown) {
-          return { success: false, error: error as AppError };
-        }
-      }
-    );
-  
   /**
-   * Validate story exists
+   * Get fields for a specific issue type (with caching)
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_FIELDS_FOR_ISSUE_TYPE,
+    async (_event, issueTypeName: string): Promise<Result<FieldDescriptor[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const fields = await jiraService.getFieldsForIssueType(issueTypeName);
+        return { success: true, data: fields };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Validate single story/issue (ENHANCED - returns exists status)
    */
   ipcMain.handle(
     IPC_CHANNELS.VALIDATE_STORY,
@@ -151,7 +57,142 @@ export function registerTestHandlers() {
   );
 
   /**
-   * Get Priorities
+   * Batch validate multiple issues (NEW)
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.VALIDATE_ISSUES,
+    async (_, issueKeys: string[]): Promise<Result<Record<string, StoryValidationResult>>> => {
+      try {
+        const jiraService = getJiraService();
+        const resultsMap = await jiraService.validateIssues(issueKeys);
+        
+        // Convert Map to plain object for IPC transfer
+        const resultsObject: Record<string, StoryValidationResult> = {};
+        resultsMap.forEach((value, key) => {
+          resultsObject[key] = value;
+        });
+        
+        return { success: true, data: resultsObject };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get test steps for a test (NEW)
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_TEST_STEPS,
+    async (_, testKey: string): Promise<Result<TestStepInput[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const steps = await jiraService.getTestSteps(testKey);
+        return { success: true, data: steps };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get all issue types
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_ISSUE_TYPES,
+    async (): Promise<Result<any[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getIssueTypes();
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get all issue link types
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_ISSUE_LINK_TYPES,
+    async (): Promise<Result<any[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getIssueLinkTypes();
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get project info by key
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_PROJECT,
+    async (_event, projectKey: string): Promise<Result<any>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getProject(projectKey);
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get issue scheme for a test
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_ISSUE_SCHEME,
+    async (_event, testKey: string): Promise<Result<any>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getIssueScheme(testKey);
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get create meta by issue type ID
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_CREATE_META_BY_TYPE_ID,
+    async (_event, typeId: string): Promise<Result<any>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getCreateMetaByTypeId(typeId);
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get all fields info
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_ALL_FIELDS,
+    async (): Promise<Result<any[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getAllFields();
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
+   * Get Priorities (cached)
    */
   ipcMain.handle(
     IPC_CHANNELS.GET_PRIORITIES,
@@ -167,7 +208,7 @@ export function registerTestHandlers() {
   );
 
   /**
-   * Get Components
+   * Get Components (cached)
    */
   ipcMain.handle(
     IPC_CHANNELS.GET_COMPONENTS,
@@ -183,7 +224,7 @@ export function registerTestHandlers() {
   );
 
   /**
-   * Get Versions
+   * Get Versions (cached)
    */
   ipcMain.handle(
     IPC_CHANNELS.GET_VERSIONS,
@@ -215,6 +256,22 @@ export function registerTestHandlers() {
   );
 
   /**
+   * Get Component Suggestions (filtered by query, same pattern as labels)
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.GET_COMPONENT_SUGGESTIONS,
+    async (_, query: string): Promise<Result<{ name: string }[]>> => {
+      try {
+        const jiraService = getJiraService();
+        const data = await jiraService.getComponentSuggestions(query);
+        return { success: true, data };
+      } catch (error: unknown) {
+        return { success: false, error: error as AppError };
+      }
+    }
+  );
+
+  /**
    * Create single test
    */
   ipcMain.handle(
@@ -226,7 +283,7 @@ export function registerTestHandlers() {
         // Create test
         const test = await jiraService.createTest(testInput);
 
-        // Add steps
+        // Add steps (FIXED - now uses POST instead of PUT)
         for (const step of testInput.steps) {
           await jiraService.addTestStep(test.key, step);
         }

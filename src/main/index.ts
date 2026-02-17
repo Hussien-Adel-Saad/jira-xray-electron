@@ -1,6 +1,7 @@
 /**
  * Main Process Entry Point
  * Sets up Electron BrowserWindow with security settings
+ * FIXED: Suppresses url.parse() deprecation warning from Electron/dependencies
  */
 
 import { app, BrowserWindow } from 'electron';
@@ -8,6 +9,18 @@ import * as path from 'path';
 import { registerAuthHandlers, clearSession, initializeAuth } from './ipc/authHandlers';
 import { registerTestHandlers } from './ipc/testHandlers';
 import { registerTemplateHandlers } from './ipc/templateHandlers';
+
+// FIX: Suppress url.parse() deprecation warning from Electron internals and axios
+// This warning comes from Electron/axios dependencies, not our code
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  // Suppress only the specific DEP0169 warning about url.parse()
+  if (warning.name === 'DeprecationWarning' && warning.message.includes('url.parse')) {
+    return; // Silently ignore
+  }
+  // Log other warnings normally
+  console.warn(warning.name, warning.message);
+});
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -77,9 +90,9 @@ function registerHandlers() {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
-  // Initialize auth from .env before starting
-  initializeAuth();
+app.whenReady().then(async () => {
+  // Initialize auth from .env before starting (THIS WILL CACHE METADATA)
+  await initializeAuth();
   registerHandlers();
   createWindow();
 
