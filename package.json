@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Secure desktop application for Jira/Xray test orchestration",
   "main": "dist-electron/main/index.js",
-  "author": "Your Name",
+  "author": "Hussien Hassan",
   "license": "MIT",
   "private": true,
   "scripts": {
