@@ -54,8 +54,8 @@
     "wait-on": "8.0.2"
   },
   "overrides": {
-    "ajv": "^8.18.0",
-    "ajv-keywords": "^5.1.0"
+    "ajv": "6.12.6",
+    "ajv-keywords": "5.1.0"
   },
   "build": {
     "appId": "com.hussien.jira-xray-orchestrator",
